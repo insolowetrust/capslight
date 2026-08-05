@@ -4,6 +4,8 @@
 #   caps-indicator working   slow blink (Claude is thinking / running tools)
 #   caps-indicator waiting   fast blink (it needs you: permission prompt, question)
 #   caps-indicator done      solid on (task finished)
+#   caps-indicator notify    for the Notification hook — picks waiting or done by reading
+#                            the message, since Notification covers both cases
 #   caps-indicator off       dark (session closed)
 #   caps-indicator reset     kill everything and turn the LED off
 #
@@ -110,7 +112,7 @@ apply() {
 
 want="${1:-}"
 [ -n "$want" ] || {
-  echo "usage: caps-indicator working|waiting|done|off|reset|disable|enable|status" >&2
+  echo "usage: caps-indicator working|waiting|done|notify|off|reset|disable|enable|status" >&2
   exit 1
 }
 
@@ -139,37 +141,57 @@ case "$want" in
     fi
     exit 0
     ;;
+  reset)
+    # Handled here, before the payload is read: reset needs no session id, and it is the
+    # command people run by hand — it must never sit waiting on stdin.
+    acquire_lock
+    rm -f "$SESS_DIR"/* 2>/dev/null
+    rm -f "$CURFILE"
+    stop_blinker
+    "$CAPSLED" off >/dev/null 2>&1
+    exit 0
+    ;;
 esac
 
-# Muted? Drain stdin so the caller never sees a broken pipe, then do nothing.
-# `reset` deliberately still works, as the way out of a stuck LED.
-if [ "$want" != "reset" ] && { [ -f "$MUTEFILE" ] || [ -n "${CAPSLIGHT_DISABLED:-}" ]; }; then
-  [ -t 0 ] || cat >/dev/null 2>&1
+# Muted? Do nothing. `reset` is handled above, so it still works while muted.
+if [ -f "$MUTEFILE" ] || [ -n "${CAPSLIGHT_DISABLED:-}" ]; then
   exit 0
 fi
 
-# --- identify the session ----------------------------------------------------
+# --- read the hook payload ---------------------------------------------------
 
+# Read stdin line by line with a timeout. Claude Code writes the hook JSON and closes the
+# pipe, so this finishes immediately in practice — but when the script inherits a pipe
+# nobody ever closes (a wrapper script, cron, launchd), a plain `cat` would hang forever.
+# `read -t` takes whole seconds only on the bash 3.2 that ships with macOS.
+payload=""
 session_id=""
 if [ ! -t 0 ]; then
-  payload="$(cat 2>/dev/null)"
+  while IFS= read -r -t 1 line; do
+    payload="$payload$line"
+  done
   session_id="$(printf '%s' "$payload" \
     | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     | head -1)"
+fi
+
+# Notification fires for two very different things: an actual permission prompt, and the
+# idle "Claude is waiting for your input" that lands right after Stop. Only the first one
+# deserves the attention blink — the second must not overwrite the solid "done" light.
+if [ "$want" = "notify" ]; then
+  message="$(printf '%s' "$payload" \
+    | sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -1)"
+  case "$message" in
+    *permission*|*Permission*|*approve*|*Approve*) want="waiting" ;;
+    *) want="done" ;;
+  esac
 fi
 [ -n "$session_id" ] || session_id="pid-$PPID"
 # normalise, in case the id carries anything odd
 session_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9._-' '_')"
 
 acquire_lock
-
-if [ "$want" = "reset" ]; then
-  rm -f "$SESS_DIR"/* 2>/dev/null
-  rm -f "$CURFILE"
-  stop_blinker
-  "$CAPSLED" off >/dev/null 2>&1
-  exit 0
-fi
 
 if [ "$want" = "off" ]; then
   rm -f "$SESS_DIR/$session_id"

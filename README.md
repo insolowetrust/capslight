@@ -63,9 +63,16 @@ Event mapping:
 | Hook | State |
 |---|---|
 | `UserPromptSubmit`, `PreToolUse`, `PostToolUse` | `working` |
-| `PermissionRequest`, `Notification` | `waiting` |
+| `PermissionRequest` | `waiting` |
+| `Notification` | `waiting` or `done`, depending on the message |
 | `Stop`, `StopFailure` | `done` |
 | `SessionEnd` | `off` |
+
+`Notification` needs the extra step because Claude Code uses it for two unrelated things:
+a real permission prompt, and the idle "waiting for your input" that fires shortly after
+`Stop`. Mapping it straight to `waiting` meant the LED started blinking fast every time
+Claude finished a task and sat idle — so the handler reads the message and only treats
+permission prompts as "needs you".
 
 ## Checking it
 

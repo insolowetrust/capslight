@@ -16,7 +16,9 @@ MAPPING = {
     "PreToolUse": "working",
     "PostToolUse": "working",
     "PermissionRequest": "waiting",
-    "Notification": "waiting",
+    # Notification covers both permission prompts and the idle "waiting for your input"
+    # that arrives right after Stop, so it is routed through a message-aware handler.
+    "Notification": "notify",
     "Stop": "done",
     "StopFailure": "done",
     "SessionEnd": "off",
