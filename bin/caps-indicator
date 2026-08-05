@@ -175,15 +175,28 @@ if [ ! -t 0 ]; then
     | head -1)"
 fi
 
+event="$(printf '%s' "$payload" \
+  | sed -n 's/.*"hook_event_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+  | head -1)"
+
+# Optional breadcrumb trail for working out why the LED did what it did.
+if [ -n "${CAPSLIGHT_DEBUG:-}" ] || [ -f "$STATE_DIR/debug" ]; then
+  printf '%s arg=%s event=%s payload=%s\n' \
+    "$(date '+%H:%M:%S')" "$want" "${event:-?}" "$payload" >> "$STATE_DIR/debug.log" 2>/dev/null
+fi
+
 # Notification fires for two very different things: an actual permission prompt, and the
 # idle "Claude is waiting for your input" that lands right after Stop. Only the first one
 # deserves the attention blink — the second must not overwrite the solid "done" light.
-if [ "$want" = "notify" ]; then
+#
+# This keys off hook_event_name rather than the argument, so it holds however the hook was
+# wired up — including installs still mapping Notification straight to `waiting`.
+if [ "$want" = "notify" ] || [ "$event" = "Notification" ]; then
   message="$(printf '%s' "$payload" \
     | sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
     | head -1)"
   case "$message" in
-    *permission*|*Permission*|*approve*|*Approve*) want="waiting" ;;
+    *permission*|*Permission*|*approve*|*Approve*|*allow*|*Allow*) want="waiting" ;;
     *) want="done" ;;
   esac
 fi

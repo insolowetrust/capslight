@@ -87,6 +87,17 @@ bin/caps-indicator reset   # panic button: kill the blinker, turn the LED off
 If nothing happens, start with `make probe`. If both backends come back `unavailable`,
 that keyboard won't hand over its LED (happens on some third-party Bluetooth models).
 
+If the LED lights up but shows the *wrong* thing, turn on the breadcrumb log and watch
+what the hooks actually send:
+
+```sh
+touch ~/.claude/capsled/debug          # start logging
+tail -f ~/.claude/capsled/debug.log    # one line per hook: argument, event, payload
+rm ~/.claude/capsled/debug             # stop (the log file stays until you delete it)
+```
+
+`CAPSLIGHT_DEBUG=1` does the same for a single run.
+
 ## Tuning the blink
 
 Via environment variables (you can set these in `~/.claude/settings.json` under `env`):
