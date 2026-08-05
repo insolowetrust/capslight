@@ -3,19 +3,21 @@ import IOKit
 import IOKit.hid
 import IOKit.hidsystem
 
-// capsled — керування зеленим LED на клавіші Caps Lock (MacBook / зовнішні клавіатури).
+// capsled — drives the green LED on the Caps Lock key (MacBook and external keyboards).
 //
-// Два способи, у порядку спроби:
-//  1) HID: пишемо напряму в LED-елемент (usage page kHIDPage_LEDs / usage kHIDUsage_LED_CapsLock).
-//     Не змінює стан модифікатора Caps Lock — друк лишається у нижньому регістрі.
-//  2) IOHIDSystem: IOHIDSetModifierLockState — надійний fallback, але реально вмикає Caps Lock.
+// Two backends, tried in this order:
+//  1) HID: write straight to the LED element (usage page kHIDPage_LEDs / usage
+//     kHIDUsage_LED_CapsLock). Leaves the Caps Lock modifier alone, so typing stays
+//     lowercase while the light is on.
+//  2) IOHIDSystem: IOHIDSetModifierLockState — a reliable fallback, but it genuinely
+//     toggles Caps Lock, so text would jump to CAPS while blinking.
 
 enum Backend: String {
     case hid
     case modifier
 }
 
-// MARK: - Backend 1: прямий запис у HID LED-елемент
+// MARK: - Backend 1: direct write to the HID LED element
 
 func setLEDViaHID(_ on: Bool) -> Bool {
     let manager = IOHIDManagerCreate(kCFAllocatorDefault, IOOptionBits(kIOHIDOptionsTypeNone))
@@ -53,7 +55,7 @@ func setLEDViaHID(_ on: Bool) -> Bool {
     return anySucceeded
 }
 
-// MARK: - Backend 2: перемикання самого модифікатора Caps Lock
+// MARK: - Backend 2: toggle the Caps Lock modifier itself
 
 func setModifierLock(_ on: Bool) -> Bool {
     let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching(kIOHIDSystemClass))
@@ -84,7 +86,7 @@ func modifierLockState() -> Bool? {
     return state
 }
 
-// MARK: - Диспетчер
+// MARK: - Dispatch
 
 var forcedBackend: Backend?
 
@@ -102,9 +104,9 @@ func setLED(_ on: Bool) -> Backend? {
     }
 }
 
-// MARK: - Режим блимання
+// MARK: - Blink mode
 
-/// Блимає до отримання SIGTERM/SIGINT, після чого гасить LED і виходить.
+/// Blinks until SIGTERM/SIGINT arrives, then turns the LED off and exits.
 func blink(interval: Double, dutyCycle: Double) -> Never {
     for sig in [SIGTERM, SIGINT, SIGHUP] {
         signal(sig) { _ in
@@ -127,18 +129,18 @@ func blink(interval: Double, dutyCycle: Double) -> Never {
 
 func usage() -> Never {
     let text = """
-    capsled — керування LED на Caps Lock
+    capsled — control the Caps Lock LED
 
-    Використання:
-      capsled on                     увімкнути
-      capsled off                    вимкнути
-      capsled blink [інтервал] [duty]  блимати (за замовч. 0.6с, duty 0.5), доки не вб'ють процес
-      capsled pulse [разів] [інтервал] коротко блимнути N разів і вийти
-      capsled state                  показати стан модифікатора Caps Lock
-      capsled probe                  перевірити, який backend працює
+    Usage:
+      capsled on                      turn the LED on
+      capsled off                     turn the LED off
+      capsled blink [interval] [duty] blink (defaults: 0.6s, duty 0.5) until killed
+      capsled pulse [times] [interval] flash N times, then exit
+      capsled state                   print the Caps Lock modifier state
+      capsled probe                   report which backends work on this machine
 
-    Прапорці:
-      --backend hid|modifier         примусовий backend (за замовч. hid з fallback на modifier)
+    Flags:
+      --backend hid|modifier          force a backend (default: hid, falling back to modifier)
     """
     print(text)
     exit(1)
@@ -158,14 +160,14 @@ let rest = Array(args.dropFirst())
 switch command {
 case "on":
     guard let backend = setLED(true) else {
-        FileHandle.standardError.write(Data("capsled: не вдалося увімкнути LED\n".utf8))
+        FileHandle.standardError.write(Data("capsled: could not turn the LED on\n".utf8))
         exit(1)
     }
     if ProcessInfo.processInfo.environment["CAPSLED_VERBOSE"] != nil { print("backend: \(backend.rawValue)") }
 
 case "off":
     guard let backend = setLED(false) else {
-        FileHandle.standardError.write(Data("capsled: не вдалося вимкнути LED\n".utf8))
+        FileHandle.standardError.write(Data("capsled: could not turn the LED off\n".utf8))
         exit(1)
     }
     if ProcessInfo.processInfo.environment["CAPSLED_VERBOSE"] != nil { print("backend: \(backend.rawValue)") }
@@ -200,8 +202,8 @@ case "probe":
     let modOK = setModifierLock(true)
     Thread.sleep(forTimeInterval: 0.4)
     _ = setModifierLock(false)
-    print("hid:      \(hidOK ? "працює" : "недоступний")")
-    print("modifier: \(modOK ? "працює" : "недоступний")")
+    print("hid:      \(hidOK ? "works" : "unavailable")")
+    print("modifier: \(modOK ? "works" : "unavailable")")
 
 default:
     usage()

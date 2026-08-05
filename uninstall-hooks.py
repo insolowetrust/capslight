@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Прибирає command-hooks індикатора з ~/.claude/settings.json, лишаючи решту hooks."""
+"""Strip the capslight command hooks from ~/.claude/settings.json, keeping every other hook."""
 import json
 import os
 
@@ -23,4 +23,4 @@ with open(SETTINGS, "w") as f:
     json.dump(settings, f, indent=2, ensure_ascii=False)
     f.write("\n")
 
-print("прибрано з:", ", ".join(removed) or "-")
+print("removed from:", ", ".join(removed) or "-")

@@ -12,7 +12,7 @@ $(BIN): $(SRC)
 	@mkdir -p bin
 	swiftc -O -o $@ $<
 
-# Те саме, що ./install.sh, лише без візуального тесту наприкінці.
+# Same as ./install.sh, minus the visual test at the end.
 install:
 	./install.sh --no-test
 
@@ -24,12 +24,12 @@ uninstall:
 probe: build
 	$(BIN) probe
 
-# Візуальна перевірка: 4с блимання «працює», 2с «увага», 2с «готово», гасне.
+# Visual check: 4s "working" blink, 3s "waiting" blink, 2s solid, then off.
 test: build
-	@echo "working (повільне блимання)…" && bin/caps-indicator working && sleep 4
-	@echo "waiting (швидке блимання)…"   && bin/caps-indicator waiting && sleep 3
-	@echo "done (горить)…"               && bin/caps-indicator done    && sleep 2
-	@echo "off"                          && bin/caps-indicator reset
+	@echo "working (slow blink)…" && bin/caps-indicator working && sleep 4
+	@echo "waiting (fast blink)…" && bin/caps-indicator waiting && sleep 3
+	@echo "done (solid)…"         && bin/caps-indicator done    && sleep 2
+	@echo "off"                   && bin/caps-indicator reset
 
 clean:
 	rm -rf bin

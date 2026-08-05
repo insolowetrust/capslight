@@ -1,41 +1,41 @@
 # capslight
 
-Зелений LED на клавіші Caps Lock як індикатор стану Claude Code.
+The green LED on your Caps Lock key as a live status indicator for Claude Code.
 
-Блимає, поки Claude працює. Горить рівно, коли таску виконано. Швидко блимає, коли
-чекає на твою відповідь. Нічого не змінює в поведінці клавіатури — Caps Lock лишається
-вимкненим, друк у нижньому регістрі.
+It blinks while Claude is working, goes solid when the task is done, and blinks fast when
+Claude is waiting on you. It changes nothing about how your keyboard behaves — Caps Lock
+stays off and your typing stays lowercase.
 
-| Стан | Лампочка | Коли |
+| State | LED | When |
 |---|---|---|
-| `working` | повільно блимає (0.7 с, короткі спалахи) | Claude думає / виконує інструменти |
-| `waiting` | швидко блимає (0.22 с) | потрібна твоя увага: запит дозволу, питання |
-| `done` | горить рівно | таску виконано |
-| `off` | згасла | сесія закрита |
+| `working` | slow blink (0.7s cycle, short flashes) | Claude is thinking / running tools |
+| `waiting` | fast blink (0.22s) | it needs you: permission prompt, question |
+| `done` | solid on | task finished |
+| `off` | dark | session closed |
 
-## Як воно працює
+## How it works
 
-`bin/capsled` — маленька Swift-утиліта на IOKit. Має два способи запалити лампочку:
+`bin/capsled` is a small IOKit utility in Swift. It has two ways to light the LED:
 
-1. **`hid`** (за замовчуванням) — пише напряму в HID LED-елемент клавіатури
-   (`kHIDPage_LEDs` / `kHIDUsage_LED_CapsLock`). **Не змінює стан модифікатора**,
-   тож друк лишається в нижньому регістрі, поки лампочка блимає. Це і є головна причина
-   не використовувати простіший спосіб нижче.
-2. **`modifier`** — `IOHIDSetModifierLockState`, fallback. Надійніший, але реально
-   вмикає Caps Lock, тобто під час блимання текст стрибав би в CAPS.
+1. **`hid`** (default) — writes straight to the keyboard's HID LED element
+   (`kHIDPage_LEDs` / `kHIDUsage_LED_CapsLock`). **It does not touch the modifier state**,
+   so your typing stays lowercase while the light blinks. That's the whole reason not to
+   use the simpler approach below.
+2. **`modifier`** — `IOHIDSetModifierLockState`, kept as a fallback. More reliable, but it
+   genuinely turns Caps Lock on, so text would jump to CAPS every time the LED flashes.
 
-Перевірити, що доступно на твоєму залізі: `make probe` (обидва працюють на вбудованій
-клавіатурі MacBook без root і без Input Monitoring).
+To see what your hardware supports: `make probe`. On a MacBook's built-in keyboard both
+work, with no root and no Input Monitoring permission.
 
-`bin/caps-indicator` — машина станів поверх `capsled`: тримає фоновий процес-блимач,
-його PID, і облік станів **по кожній сесії окремо** в `~/.claude/capsled/sessions/`.
-Якщо відкрито кілька вікон Claude, на LED показується найпріоритетніший стан
-(`waiting` > `working` > `done` > `off`) — одна сесія, що завершилась, не гасить
-індикатор іншої, яка ще працює.
+`bin/caps-indicator` is a state machine on top of `capsled`. It owns the background blink
+process and its PID, and tracks state **per Claude session** in `~/.claude/capsled/sessions/`.
+With several Claude windows open, the LED shows the highest-priority state
+(`waiting` > `working` > `done` > `off`) — so one session finishing won't switch off the
+indicator for another that's still running.
 
-## Встановлення
+## Install
 
-Потрібні лише Xcode Command Line Tools (`swiftc`, `python3`) — жодних залежностей.
+All you need is the Xcode Command Line Tools (`swiftc`, `python3`). No other dependencies.
 
 ```sh
 git clone https://github.com/insolowetrust/capslight.git
@@ -43,75 +43,75 @@ cd capslight
 ./install.sh
 ```
 
-`install.sh` робить усе за раз: перевіряє передумови, збирає бінарник, з'ясовує який
-backend доступний на твоєму залізі, ставить симлінки в `~/.claude/bin/`, підключає
-hooks і проганяє візуальний тест лампочки. Прапорець `--no-test` пропускає тест.
+`install.sh` does the lot: checks prerequisites, builds the binary, probes which backend
+your hardware supports, symlinks into `~/.claude/bin/`, wires up the hooks, and finishes
+with a visual test of the LED. Pass `--no-test` to skip that last step.
 
-Наявні hooks у `~/.claude/settings.json` не чіпаються — індикатор додається окремими
-записами, решта конфігурації лишається як була. Перед першою зміною робиться бекап у
-`~/.claude/settings.json.bak-capslight`. Скрипт ідемпотентний: повторний запуск замінює
-свої записи, а не дублює їх.
+Your existing hooks in `~/.claude/settings.json` are left alone — capslight adds its own
+separate entries and the rest of your config stays as it was. A backup is written to
+`~/.claude/settings.json.bak-capslight` before the first change. Re-running is safe: it
+replaces its own entries rather than duplicating them.
 
-Якщо більше любиш make — `make install` робить те саме, але без перевірок і тесту.
+If you prefer make: `make install` does the same thing without the checks and the test.
 
-**Зміни підхоплюються після перезапуску сесії Claude Code.**
+**The hooks are picked up after you restart your Claude Code session.**
 
-Мапа подій:
+Event mapping:
 
-| Hook | Стан |
+| Hook | State |
 |---|---|
 | `UserPromptSubmit`, `PreToolUse`, `PostToolUse` | `working` |
 | `PermissionRequest`, `Notification` | `waiting` |
 | `Stop`, `StopFailure` | `done` |
 | `SessionEnd` | `off` |
 
-## Перевірка
+## Checking it
 
 ```sh
-make test          # прогін усіх станів з паузами — дивись на клавіатуру
-make probe         # який backend доступний
-bin/capsled on     # запалити вручну
+make test          # walks through every state with pauses — watch your keyboard
+make probe         # which backend is available
+bin/capsled on     # light it manually
 bin/capsled off
-bin/caps-indicator reset   # аварійно все погасити й убити блимач
+bin/caps-indicator reset   # panic button: kill the blinker, turn the LED off
 ```
 
-Якщо лампочка не реагує — почни з `make probe`. Якщо там обидва backend'и «недоступний»,
-клавіатура не віддає керування LED (буває на деяких bluetooth-моделях сторонніх вендорів).
+If nothing happens, start with `make probe`. If both backends come back `unavailable`,
+that keyboard won't hand over its LED (happens on some third-party Bluetooth models).
 
-## Налаштування швидкості
+## Tuning the blink
 
-Через env-змінні (можна виставити в `~/.claude/settings.json` → `env`):
+Via environment variables (you can set these in `~/.claude/settings.json` under `env`):
 
 ```
 CAPS_WORKING_INTERVAL=0.7   CAPS_WORKING_DUTY=0.35
 CAPS_WAITING_INTERVAL=0.22  CAPS_WAITING_DUTY=0.5
 ```
 
-`DUTY` — частка циклу, коли лампочка горить. 0.35 дає короткі спалахи (менше дратує
-периферійним зором), 0.5 — рівне блимання.
+`DUTY` is the fraction of each cycle the LED stays lit. 0.35 gives short flashes (less
+distracting in peripheral vision), 0.5 gives an even blink.
 
-Примусити конкретний backend: `bin/capsled --backend modifier on`.
+To force a backend: `bin/capsled --backend modifier on`.
 
-## Видалення
+## Uninstall
 
 ```sh
 make uninstall
 ```
 
-Прибирає hooks з `~/.claude/settings.json`, видаляє симлінки й гасить лампочку.
-Бекап початкових налаштувань лежить у `~/.claude/settings.json.bak-capslight`.
+Removes the hooks from `~/.claude/settings.json`, deletes the symlinks and turns the LED
+off. Your original settings are still in `~/.claude/settings.json.bak-capslight`.
 
-## Відомі обмеження
+## Known limitations
 
-- Якщо натиснути справжній Caps Lock під час блимання, система перепише стан LED —
-  наступний спалах його поверне, але одне «моргання» може збитись.
-- Якщо процес Claude вбити через `kill -9`, `SessionEnd` не спрацює і лампочка
-  залишиться в останньому стані. Осиротілі записи сесій самі прибираються через 4 години;
-  негайно — `bin/caps-indicator reset`.
-- Зовнішні клавіатури теж підхоплюються — команда йде на всі HID-клавіатури одразу.
+- Pressing the real Caps Lock key mid-blink makes the system overwrite the LED state. The
+  next flash puts it back, but you may see one beat go out of step.
+- If Claude is killed with `kill -9`, `SessionEnd` never fires and the LED stays in its
+  last state. Orphaned session records clear themselves after 4 hours; to fix it now, run
+  `bin/caps-indicator reset`.
+- External keyboards are driven too — the command goes to every HID keyboard at once.
 
-## Автор
+## Author
 
 Max Solo — [t.me/aiukraine_wetrust](https://t.me/aiukraine_wetrust)
 
-MIT. Роби що хочеш.
+MIT. Do whatever you like with it.

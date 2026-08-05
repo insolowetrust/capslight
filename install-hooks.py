@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Додає command-hooks індикатора у ~/.claude/settings.json, не чіпаючи наявні http-hooks."""
+"""Add the capslight command hooks to ~/.claude/settings.json, leaving existing hooks alone."""
 import json
 import os
 
@@ -26,7 +26,7 @@ hooks = settings.setdefault("hooks", {})
 added, refreshed = [], []
 for event, state in MAPPING.items():
     entries = hooks.setdefault(event, [])
-    # прибираємо попередні версії нашого hook'а (щоб скрипт був ідемпотентним)
+    # drop earlier copies of our hook, so re-running stays idempotent
     before = len(entries)
     entries[:] = [
         e for e in entries
@@ -49,5 +49,5 @@ with open(SETTINGS, "w") as f:
     json.dump(settings, f, indent=2, ensure_ascii=False)
     f.write("\n")
 
-print("додано:", ", ".join(added) or "-")
-print("оновлено:", ", ".join(refreshed) or "-")
+print("added:  ", ", ".join(added) or "-")
+print("updated:", ", ".join(refreshed) or "-")

@@ -1,14 +1,14 @@
 #!/bin/bash
-# caps-indicator — стани індикатора Claude на LED клавіші Caps Lock.
+# caps-indicator — Claude Code status states on the Caps Lock LED.
 #
-#   caps-indicator working   повільне блимання (Claude думає / працює)
-#   caps-indicator waiting   швидке блимання (потрібна твоя увага: дозвіл, питання)
-#   caps-indicator done      горить постійно (таску виконано)
-#   caps-indicator off       гасне (сесія закрита)
-#   caps-indicator reset     вбити все й погасити
+#   caps-indicator working   slow blink (Claude is thinking / running tools)
+#   caps-indicator waiting   fast blink (it needs you: permission prompt, question)
+#   caps-indicator done      solid on (task finished)
+#   caps-indicator off       dark (session closed)
+#   caps-indicator reset     kill everything and turn the LED off
 #
-# Викликається з hooks Claude Code. Кілька паралельних сесій враховуються:
-# стан кожної тримається окремо, на LED показується найпріоритетніший
+# Called from Claude Code hooks. Concurrent sessions are handled: each session's state
+# is tracked separately and the highest-priority one wins the LED
 # (waiting > working > done > off).
 
 set -u
@@ -22,7 +22,7 @@ PIDFILE="$STATE_DIR/blink.pid"
 CURFILE="$STATE_DIR/current"
 LOCKDIR="$STATE_DIR/lock"
 
-# Параметри блимання: інтервал циклу та частка часу «горить».
+# Blink shape: cycle length and the fraction of it the LED stays lit.
 WORKING_INTERVAL="${CAPS_WORKING_INTERVAL:-0.7}"
 WORKING_DUTY="${CAPS_WORKING_DUTY:-0.35}"
 WAITING_INTERVAL="${CAPS_WAITING_INTERVAL:-0.22}"
@@ -30,9 +30,9 @@ WAITING_DUTY="${CAPS_WAITING_DUTY:-0.5}"
 
 mkdir -p "$SESS_DIR"
 
-[ -x "$CAPSLED" ] || { echo "caps-indicator: не знайдено $CAPSLED" >&2; exit 1; }
+[ -x "$CAPSLED" ] || { echo "caps-indicator: $CAPSLED not found" >&2; exit 1; }
 
-# --- допоміжне ---------------------------------------------------------------
+# --- helpers -----------------------------------------------------------------
 
 priority() {
   case "$1" in
@@ -43,11 +43,11 @@ priority() {
   esac
 }
 
-# Примітивний лок, щоб паралельні hooks не билися за LED.
+# Crude lock so concurrent hooks don't fight over the LED.
 acquire_lock() {
   local tries=0
   while ! mkdir "$LOCKDIR" 2>/dev/null; do
-    # знімаємо протухлий лок (старший за 10 секунд)
+    # clear a stale lock (older than ~10 seconds)
     if [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +0.17 2>/dev/null)" ]; then
       rmdir "$LOCKDIR" 2>/dev/null
     fi
@@ -64,7 +64,7 @@ stop_blinker() {
     pid="$(cat "$PIDFILE" 2>/dev/null)"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
       kill -TERM "$pid" 2>/dev/null
-      # даємо процесу погасити LED за собою
+      # give it a moment to turn the LED off on its way out
       local i=0
       while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do
         sleep 0.02
@@ -85,7 +85,7 @@ start_blinker() {
 
 apply() {
   local state="$1"
-  # уже в цьому стані — нічого не робимо (щоб блимання не рестартувало на кожен PostToolUse)
+  # already in this state — do nothing, so the blink doesn't restart on every PostToolUse
   [ -f "$CURFILE" ] && [ "$(cat "$CURFILE" 2>/dev/null)" = "$state" ] && return 0
 
   stop_blinker
@@ -98,7 +98,7 @@ apply() {
   echo "$state" > "$CURFILE"
 }
 
-# --- визначаємо сесію --------------------------------------------------------
+# --- identify the session ----------------------------------------------------
 
 session_id=""
 if [ ! -t 0 ]; then
@@ -108,10 +108,10 @@ if [ ! -t 0 ]; then
     | head -1)"
 fi
 [ -n "$session_id" ] || session_id="pid-$PPID"
-# нормалізуємо на випадок дивних символів у id
+# normalise, in case the id carries anything odd
 session_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9._-' '_')"
 
-# --- основна логіка ----------------------------------------------------------
+# --- main --------------------------------------------------------------------
 
 want="${1:-}"
 [ -n "$want" ] || { echo "usage: caps-indicator working|waiting|done|off|reset" >&2; exit 1; }
@@ -132,10 +132,10 @@ else
   echo "$want" > "$SESS_DIR/$session_id"
 fi
 
-# прибираємо сесії, від яких понад 4 години не було сигналу (Claude вбито / краш)
+# drop sessions silent for over 4 hours (Claude killed / crashed)
 find "$SESS_DIR" -maxdepth 1 -type f -mmin +240 -delete 2>/dev/null
 
-# ефективний стан = максимум по всіх живих сесіях
+# effective state = highest priority across all live sessions
 effective="off"
 best=0
 for f in "$SESS_DIR"/*; do
