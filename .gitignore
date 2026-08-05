@@ -1,0 +1,4 @@
+bin/capsled
+*.o
+*.dSYM/
+.DS_Store

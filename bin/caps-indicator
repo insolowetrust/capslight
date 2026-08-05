@@ -1,0 +1,152 @@
+#!/bin/bash
+# caps-indicator — стани індикатора Claude на LED клавіші Caps Lock.
+#
+#   caps-indicator working   повільне блимання (Claude думає / працює)
+#   caps-indicator waiting   швидке блимання (потрібна твоя увага: дозвіл, питання)
+#   caps-indicator done      горить постійно (таску виконано)
+#   caps-indicator off       гасне (сесія закрита)
+#   caps-indicator reset     вбити все й погасити
+#
+# Викликається з hooks Claude Code. Кілька паралельних сесій враховуються:
+# стан кожної тримається окремо, на LED показується найпріоритетніший
+# (waiting > working > done > off).
+
+set -u
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CAPSLED="$SELF_DIR/capsled"
+
+STATE_DIR="${CAPS_INDICATOR_HOME:-$HOME/.claude/capsled}"
+SESS_DIR="$STATE_DIR/sessions"
+PIDFILE="$STATE_DIR/blink.pid"
+CURFILE="$STATE_DIR/current"
+LOCKDIR="$STATE_DIR/lock"
+
+# Параметри блимання: інтервал циклу та частка часу «горить».
+WORKING_INTERVAL="${CAPS_WORKING_INTERVAL:-0.7}"
+WORKING_DUTY="${CAPS_WORKING_DUTY:-0.35}"
+WAITING_INTERVAL="${CAPS_WAITING_INTERVAL:-0.22}"
+WAITING_DUTY="${CAPS_WAITING_DUTY:-0.5}"
+
+mkdir -p "$SESS_DIR"
+
+[ -x "$CAPSLED" ] || { echo "caps-indicator: не знайдено $CAPSLED" >&2; exit 1; }
+
+# --- допоміжне ---------------------------------------------------------------
+
+priority() {
+  case "$1" in
+    waiting) echo 3 ;;
+    working) echo 2 ;;
+    done)    echo 1 ;;
+    *)       echo 0 ;;
+  esac
+}
+
+# Примітивний лок, щоб паралельні hooks не билися за LED.
+acquire_lock() {
+  local tries=0
+  while ! mkdir "$LOCKDIR" 2>/dev/null; do
+    # знімаємо протухлий лок (старший за 10 секунд)
+    if [ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +0.17 2>/dev/null)" ]; then
+      rmdir "$LOCKDIR" 2>/dev/null
+    fi
+    tries=$((tries + 1))
+    [ "$tries" -gt 50 ] && return 0
+    sleep 0.02
+  done
+  trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT
+}
+
+stop_blinker() {
+  if [ -f "$PIDFILE" ]; then
+    local pid
+    pid="$(cat "$PIDFILE" 2>/dev/null)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+      kill -TERM "$pid" 2>/dev/null
+      # даємо процесу погасити LED за собою
+      local i=0
+      while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do
+        sleep 0.02
+        i=$((i + 1))
+      done
+      kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null
+    fi
+    rm -f "$PIDFILE"
+  fi
+}
+
+start_blinker() {
+  local interval="$1" duty="$2"
+  nohup "$CAPSLED" blink "$interval" "$duty" >/dev/null 2>&1 &
+  echo $! > "$PIDFILE"
+  disown 2>/dev/null || true
+}
+
+apply() {
+  local state="$1"
+  # уже в цьому стані — нічого не робимо (щоб блимання не рестартувало на кожен PostToolUse)
+  [ -f "$CURFILE" ] && [ "$(cat "$CURFILE" 2>/dev/null)" = "$state" ] && return 0
+
+  stop_blinker
+  case "$state" in
+    working) start_blinker "$WORKING_INTERVAL" "$WORKING_DUTY" ;;
+    waiting) start_blinker "$WAITING_INTERVAL" "$WAITING_DUTY" ;;
+    done)    "$CAPSLED" on  >/dev/null 2>&1 ;;
+    *)       "$CAPSLED" off >/dev/null 2>&1 ;;
+  esac
+  echo "$state" > "$CURFILE"
+}
+
+# --- визначаємо сесію --------------------------------------------------------
+
+session_id=""
+if [ ! -t 0 ]; then
+  payload="$(cat 2>/dev/null)"
+  session_id="$(printf '%s' "$payload" \
+    | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    | head -1)"
+fi
+[ -n "$session_id" ] || session_id="pid-$PPID"
+# нормалізуємо на випадок дивних символів у id
+session_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9._-' '_')"
+
+# --- основна логіка ----------------------------------------------------------
+
+want="${1:-}"
+[ -n "$want" ] || { echo "usage: caps-indicator working|waiting|done|off|reset" >&2; exit 1; }
+
+acquire_lock
+
+if [ "$want" = "reset" ]; then
+  rm -f "$SESS_DIR"/* 2>/dev/null
+  rm -f "$CURFILE"
+  stop_blinker
+  "$CAPSLED" off >/dev/null 2>&1
+  exit 0
+fi
+
+if [ "$want" = "off" ]; then
+  rm -f "$SESS_DIR/$session_id"
+else
+  echo "$want" > "$SESS_DIR/$session_id"
+fi
+
+# прибираємо сесії, від яких понад 4 години не було сигналу (Claude вбито / краш)
+find "$SESS_DIR" -maxdepth 1 -type f -mmin +240 -delete 2>/dev/null
+
+# ефективний стан = максимум по всіх живих сесіях
+effective="off"
+best=0
+for f in "$SESS_DIR"/*; do
+  [ -f "$f" ] || continue
+  s="$(cat "$f" 2>/dev/null)"
+  p="$(priority "$s")"
+  if [ "$p" -gt "$best" ]; then
+    best="$p"
+    effective="$s"
+  fi
+done
+
+apply "$effective"
+exit 0
