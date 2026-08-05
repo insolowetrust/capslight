@@ -33,6 +33,8 @@ With several Claude windows open, the LED shows the highest-priority state
 (`waiting` > `working` > `done` > `off`) — so one session finishing won't switch off the
 indicator for another that's still running.
 
+https://github.com/user-attachments/assets/49936cdf-c3d8-4f2c-9f6a-aa5b0cba6fc5
+
 ## Install
 
 All you need is the Xcode Command Line Tools (`swiftc`, `python3`). No other dependencies.
