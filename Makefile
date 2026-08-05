@@ -17,9 +17,10 @@ install:
 	./install.sh --no-test
 
 uninstall:
+	-bin/caps-indicator reset
 	python3 uninstall-hooks.py
 	rm -f $(CLAUDE_BIN)/capsled $(CLAUDE_BIN)/caps-indicator
-	-bin/capsled off
+	rm -rf $(HOME)/.claude/capsled
 
 probe: build
 	$(BIN) probe

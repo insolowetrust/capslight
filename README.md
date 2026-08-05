@@ -98,8 +98,22 @@ To force a backend: `bin/capsled --backend modifier on`.
 make uninstall
 ```
 
-Removes the hooks from `~/.claude/settings.json`, deletes the symlinks and turns the LED
-off. Your original settings are still in `~/.claude/settings.json.bak-capslight`.
+Turns the LED off, removes the hooks from `~/.claude/settings.json`, deletes the symlinks
+and clears the state directory. Your original settings are still in
+`~/.claude/settings.json.bak-capslight`.
+
+### What it touches
+
+Worth knowing before you run a script that edits your config:
+
+- `~/.claude/settings.json` — adds one command hook per event listed above, nothing else.
+  A pristine copy is kept as `.bak-capslight` before the first change, and writes go
+  through a temp file plus atomic rename, so an interrupted run can't truncate your
+  settings. If the file isn't valid JSON, the installer says so and changes nothing.
+- `~/.claude/bin/` — two symlinks pointing back at this checkout.
+- `~/.claude/capsled/` — the blinker's PID and per-session state.
+
+Nothing runs as root, nothing is downloaded, nothing phones home.
 
 ## Known limitations
 
