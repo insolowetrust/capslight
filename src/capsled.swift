@@ -107,7 +107,12 @@ func setLED(_ on: Bool) -> Backend? {
 // MARK: - Blink mode
 
 /// Blinks until SIGTERM/SIGINT arrives, then turns the LED off and exits.
-func blink(interval: Double, dutyCycle: Double) -> Never {
+///
+/// `maxSeconds` is a dead-man's switch: a blinker that loses its parent — a crashed
+/// session, a `kill -9`, anything that skips the cleanup path — would otherwise blink
+/// forever with nothing left to stop it. Whoever is still driving the LED restarts it,
+/// so the cap costs nothing while a session is genuinely alive. Zero disables it.
+func blink(interval: Double, dutyCycle: Double, maxSeconds: Double) -> Never {
     for sig in [SIGTERM, SIGINT, SIGHUP] {
         signal(sig) { _ in
             setLED(false)
@@ -117,7 +122,13 @@ func blink(interval: Double, dutyCycle: Double) -> Never {
 
     let onTime = interval * dutyCycle
     let offTime = interval - onTime
+    let deadline = maxSeconds > 0 ? Date().addingTimeInterval(maxSeconds) : Date.distantFuture
+
     while true {
+        if Date() >= deadline {
+            setLED(false)
+            exit(0)
+        }
         setLED(true)
         Thread.sleep(forTimeInterval: onTime)
         setLED(false)
@@ -134,7 +145,9 @@ func usage() -> Never {
     Usage:
       capsled on                      turn the LED on
       capsled off                     turn the LED off
-      capsled blink [interval] [duty] blink (defaults: 0.6s, duty 0.5) until killed
+      capsled blink [interval] [duty] [max-seconds]
+                                      blink (defaults: 0.6s, duty 0.5) until killed;
+                                      max-seconds gives up after that long (0 = never)
       capsled pulse [times] [interval] flash N times, then exit
       capsled state                   print the Caps Lock modifier state
       capsled probe                   report which backends work on this machine
@@ -175,7 +188,12 @@ case "off":
 case "blink":
     let interval = rest.first.flatMap(Double.init) ?? 0.6
     let duty = rest.dropFirst().first.flatMap(Double.init) ?? 0.5
-    blink(interval: max(0.05, interval), dutyCycle: min(0.95, max(0.05, duty)))
+    let maxSeconds = rest.dropFirst(2).first.flatMap(Double.init) ?? 0
+    blink(
+        interval: max(0.05, interval),
+        dutyCycle: min(0.95, max(0.05, duty)),
+        maxSeconds: max(0, maxSeconds)
+    )
 
 case "pulse":
     let times = rest.first.flatMap(Int.init) ?? 3

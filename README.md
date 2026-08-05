@@ -105,6 +105,7 @@ Via environment variables (you can set these in `~/.claude/settings.json` under 
 ```
 CAPS_WORKING_INTERVAL=0.7   CAPS_WORKING_DUTY=0.35
 CAPS_WAITING_INTERVAL=0.22  CAPS_WAITING_DUTY=0.5
+CAPS_BLINK_MAX_SECONDS=900  CAPS_SESSION_TTL_MINUTES=30
 ```
 
 `DUTY` is the fraction of each cycle the LED stays lit. 0.35 gives short flashes (less
@@ -164,9 +165,12 @@ Nothing runs as root, nothing is downloaded, nothing phones home.
 
 - Pressing the real Caps Lock key mid-blink makes the system overwrite the LED state. The
   next flash puts it back, but you may see one beat go out of step.
-- If Claude is killed with `kill -9`, `SessionEnd` never fires and the LED stays in its
-  last state. Orphaned session records clear themselves after 4 hours; to fix it now, run
-  `bin/caps-indicator reset`.
+- If Claude is killed with `kill -9`, `SessionEnd` never fires. Two dead-man's switches
+  cover that: the blinker gives up after 15 minutes without anyone refreshing it, and a
+  session record is dropped after 30 minutes of silence. A live session touches its record
+  on every hook, so neither fires in normal use. To clear it immediately, run
+  `bin/caps-indicator reset`. Both are tunable via `CAPS_BLINK_MAX_SECONDS` and
+  `CAPS_SESSION_TTL_MINUTES`.
 - External keyboards are driven too — the command goes to every HID keyboard at once.
 
 ## Author

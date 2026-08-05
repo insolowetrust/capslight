@@ -38,6 +38,12 @@ WORKING_DUTY="${CAPS_WORKING_DUTY:-0.35}"
 WAITING_INTERVAL="${CAPS_WAITING_INTERVAL:-0.22}"
 WAITING_DUTY="${CAPS_WAITING_DUTY:-0.5}"
 
+# How long a blinker may run without anyone refreshing it, and how long a session record
+# survives without a hook. Both are dead-man's switches for sessions that end abruptly:
+# an active session touches its record on every hook, so neither ever fires in normal use.
+BLINK_MAX_SECONDS="${CAPS_BLINK_MAX_SECONDS:-900}"
+SESSION_TTL_MINUTES="${CAPS_SESSION_TTL_MINUTES:-30}"
+
 mkdir -p "$SESS_DIR"
 
 [ -x "$CAPSLED" ] || { echo "caps-indicator: $CAPSLED not found" >&2; exit 1; }
@@ -68,6 +74,12 @@ acquire_lock() {
   trap 'rmdir "$LOCKDIR" 2>/dev/null' EXIT
 }
 
+blinker_alive() {
+  local pid
+  pid="$(cat "$PIDFILE" 2>/dev/null)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
 stop_blinker() {
   if [ -f "$PIDFILE" ]; then
     local pid
@@ -84,19 +96,31 @@ stop_blinker() {
     fi
     rm -f "$PIDFILE"
   fi
+
+  # Sweep up any blinker the pid file doesn't know about. One can be orphaned by a crashed
+  # session, a kill -9, or a pid file overwritten by a racing hook — and nothing else would
+  # ever reap it, so the LED keeps blinking with no session behind it.
+  pkill -f "$(basename "$CAPSLED") blink" 2>/dev/null || true
 }
 
 start_blinker() {
   local interval="$1" duty="$2"
-  nohup "$CAPSLED" blink "$interval" "$duty" >/dev/null 2>&1 &
+  nohup "$CAPSLED" blink "$interval" "$duty" "$BLINK_MAX_SECONDS" >/dev/null 2>&1 &
   echo $! > "$PIDFILE"
   disown 2>/dev/null || true
 }
 
 apply() {
   local state="$1"
-  # already in this state — do nothing, so the blink doesn't restart on every PostToolUse
-  [ -f "$CURFILE" ] && [ "$(cat "$CURFILE" 2>/dev/null)" = "$state" ] && return 0
+  # Already in this state — do nothing, so the blink doesn't restart on every PostToolUse.
+  # Unless the blinker died on us (its own dead-man's switch, or someone killed it), in
+  # which case fall through and start a fresh one.
+  if [ -f "$CURFILE" ] && [ "$(cat "$CURFILE" 2>/dev/null)" = "$state" ]; then
+    case "$state" in
+      working|waiting) blinker_alive && return 0 ;;
+      *)               return 0 ;;
+    esac
+  fi
 
   stop_blinker
   case "$state" in
@@ -212,8 +236,8 @@ else
   echo "$want" > "$SESS_DIR/$session_id"
 fi
 
-# drop sessions silent for over 4 hours (Claude killed / crashed)
-find "$SESS_DIR" -maxdepth 1 -type f -mmin +240 -delete 2>/dev/null
+# drop sessions that have gone silent (Claude killed / crashed, so no SessionEnd arrived)
+find "$SESS_DIR" -maxdepth 1 -type f -mmin "+$SESSION_TTL_MINUTES" -delete 2>/dev/null
 
 # effective state = highest priority across all live sessions
 effective="off"
