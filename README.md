@@ -94,6 +94,31 @@ distracting in peripheral vision), 0.5 gives an even blink.
 
 To force a backend: `bin/capsled --backend modifier on`.
 
+## Turning it off
+
+Sometimes you don't want a blinking keyboard — a screen recording, a meeting, a demo.
+No need to uninstall:
+
+```sh
+caps-indicator disable   # LED goes dark and stays dark
+caps-indicator enable    # back to normal on the next hook
+caps-indicator status    # muted or active, and the current state
+```
+
+The hooks stay wired; they just return immediately and do nothing. The switch is a flag
+file at `~/.claude/capsled/disabled`, so it survives restarts and applies to every session
+at once. `make disable` / `make enable` / `make status` do the same from the checkout.
+
+To mute a single session instead of all of them, launch Claude with the environment
+variable set:
+
+```sh
+CAPSLIGHT_DISABLED=1 claude
+```
+
+`caps-indicator reset` keeps working while muted — it's the way out if the LED ever gets
+stuck.
+
 ## Uninstall
 
 ```sh
@@ -113,7 +138,7 @@ Worth knowing before you run a script that edits your config:
   through a temp file plus atomic rename, so an interrupted run can't truncate your
   settings. If the file isn't valid JSON, the installer says so and changes nothing.
 - `~/.claude/bin/` — two symlinks pointing back at this checkout.
-- `~/.claude/capsled/` — the blinker's PID and per-session state.
+- `~/.claude/capsled/` — the blinker's PID, per-session state and the mute flag.
 
 Nothing runs as root, nothing is downloaded, nothing phones home.
 

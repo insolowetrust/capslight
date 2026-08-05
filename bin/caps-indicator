@@ -7,9 +7,16 @@
 #   caps-indicator off       dark (session closed)
 #   caps-indicator reset     kill everything and turn the LED off
 #
+#   caps-indicator disable   mute the indicator (hooks stay wired, they just do nothing)
+#   caps-indicator enable    unmute it
+#   caps-indicator status    report muted/active and the current state
+#
 # Called from Claude Code hooks. Concurrent sessions are handled: each session's state
 # is tracked separately and the highest-priority one wins the LED
 # (waiting > working > done > off).
+#
+# Set CAPSLIGHT_DISABLED=1 in the environment to mute a single session without
+# touching the global switch.
 
 set -u
 
@@ -21,6 +28,7 @@ SESS_DIR="$STATE_DIR/sessions"
 PIDFILE="$STATE_DIR/blink.pid"
 CURFILE="$STATE_DIR/current"
 LOCKDIR="$STATE_DIR/lock"
+MUTEFILE="$STATE_DIR/disabled"
 
 # Blink shape: cycle length and the fraction of it the LED stays lit.
 WORKING_INTERVAL="${CAPS_WORKING_INTERVAL:-0.7}"
@@ -98,6 +106,48 @@ apply() {
   echo "$state" > "$CURFILE"
 }
 
+# --- main --------------------------------------------------------------------
+
+want="${1:-}"
+[ -n "$want" ] || {
+  echo "usage: caps-indicator working|waiting|done|off|reset|disable|enable|status" >&2
+  exit 1
+}
+
+# The mute switch, handled before anything else so it stays cheap and always works.
+case "$want" in
+  disable)
+    acquire_lock
+    : > "$MUTEFILE"
+    stop_blinker
+    rm -f "$CURFILE"
+    "$CAPSLED" off >/dev/null 2>&1
+    echo "capslight: muted — hooks stay wired but the LED stays dark"
+    echo "           re-enable with: caps-indicator enable"
+    exit 0
+    ;;
+  enable)
+    rm -f "$MUTEFILE"
+    echo "capslight: active again — the next hook will light it up"
+    exit 0
+    ;;
+  status)
+    if [ -f "$MUTEFILE" ]; then
+      echo "muted (caps-indicator enable to turn it back on)"
+    else
+      echo "active, current state: $(cat "$CURFILE" 2>/dev/null || echo off)"
+    fi
+    exit 0
+    ;;
+esac
+
+# Muted? Drain stdin so the caller never sees a broken pipe, then do nothing.
+# `reset` deliberately still works, as the way out of a stuck LED.
+if [ "$want" != "reset" ] && { [ -f "$MUTEFILE" ] || [ -n "${CAPSLIGHT_DISABLED:-}" ]; }; then
+  [ -t 0 ] || cat >/dev/null 2>&1
+  exit 0
+fi
+
 # --- identify the session ----------------------------------------------------
 
 session_id=""
@@ -110,11 +160,6 @@ fi
 [ -n "$session_id" ] || session_id="pid-$PPID"
 # normalise, in case the id carries anything odd
 session_id="$(printf '%s' "$session_id" | tr -c 'A-Za-z0-9._-' '_')"
-
-# --- main --------------------------------------------------------------------
-
-want="${1:-}"
-[ -n "$want" ] || { echo "usage: caps-indicator working|waiting|done|off|reset" >&2; exit 1; }
 
 acquire_lock
 

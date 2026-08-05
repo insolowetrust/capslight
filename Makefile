@@ -2,7 +2,7 @@ BIN := bin/capsled
 SRC := src/capsled.swift
 CLAUDE_BIN := $(HOME)/.claude/bin
 
-.PHONY: all build install uninstall probe test clean
+.PHONY: all build install uninstall probe test clean disable enable status
 
 all: build
 
@@ -24,6 +24,16 @@ uninstall:
 
 probe: build
 	$(BIN) probe
+
+# Mute without uninstalling — the hooks stay wired and simply do nothing.
+disable:
+	bin/caps-indicator disable
+
+enable:
+	bin/caps-indicator enable
+
+status:
+	@bin/caps-indicator status
 
 # Visual check: 4s "working" blink, 3s "waiting" blink, 2s solid, then off.
 test: build
